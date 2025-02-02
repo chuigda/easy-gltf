@@ -10,6 +10,8 @@ pub use material::*;
 pub use mode::*;
 pub use vertex::*;
 
+pub use gltf::scene::Transform as Transform;
+
 /// Geometry to be rendered with the given material.
 ///
 /// # Examples
@@ -70,6 +72,8 @@ pub struct Model {
     #[cfg(feature = "extras")]
     pub(crate) primitive_extras: gltf::json::extras::Extras,
 
+    pub(crate) transform: Vec<Transform>,
+
     pub(crate) primitive_index: usize,
     pub(crate) vertices: Vec<Vertex>,
     pub(crate) indices: Option<Vec<u32>>,
@@ -108,6 +112,11 @@ impl Model {
     /// Primitive extra data. Requires the `extras` feature.
     pub fn primitive_extras(&self) -> &gltf::json::extras::Extras {
         &self.primitive_extras
+    }
+
+    /// Transform of the model.
+    pub fn transform(&self) -> &Vec<Transform> {
+        &self.transform
     }
 
     /// Material to apply to the whole model.
@@ -265,29 +274,11 @@ impl Model {
         self.has_colors
     }
 
-    fn apply_transform_position(pos: [f32; 3], transform: &Matrix4<f32>) -> Vector3<f32> {
-        let pos = Vector4::new(pos[0], pos[1], pos[2], 1.);
-        let res = transform * pos;
-        Vector3::new(res.x / res.w, res.y / res.w, res.z / res.w)
-    }
-
-    fn apply_transform_vector(vec: [f32; 3], transform: &Matrix4<f32>) -> Vector3<f32> {
-        let vec = Vector4::new(vec[0], vec[1], vec[2], 0.);
-        (transform * vec).truncate()
-    }
-
-    fn apply_transform_tangent(tangent: [f32; 4], transform: &Matrix4<f32>) -> Vector4<f32> {
-        let tang = Vector4::new(tangent[0], tangent[1], tangent[2], 0.);
-        let mut tang = transform * tang;
-        tang[3] = tangent[3];
-        tang
-    }
-
     pub(crate) fn load(
         mesh: &gltf::Mesh,
         primitive_index: usize,
         primitive: gltf::Primitive,
-        transform: &Matrix4<f32>,
+        transform: Vec<Transform>,
         data: &mut GltfData,
     ) -> Self {
         #[cfg(not(feature = "names"))]
@@ -305,8 +296,8 @@ impl Model {
         let mut vertices: Vec<_> = reader
             .read_positions()
             .unwrap_or_else(|| panic!("The model primitive doesn't contain positions"))
-            .map(|pos| Vertex {
-                position: Self::apply_transform_position(pos, transform),
+            .map(|position| Vertex {
+                position: position.into(),
                 ..Default::default()
             })
             .collect();
@@ -314,7 +305,7 @@ impl Model {
         // Fill normals
         let has_normals = if let Some(normals) = reader.read_normals() {
             for (i, normal) in normals.enumerate() {
-                vertices[i].normal = Self::apply_transform_vector(normal, transform).normalize();
+                vertices[i].normal = normal.into()
             }
             true
         } else {
@@ -324,7 +315,7 @@ impl Model {
         // Fill tangents
         let has_tangents = if let Some(tangents) = reader.read_tangents() {
             for (i, tangent) in tangents.enumerate() {
-                let tangent = Self::apply_transform_tangent(tangent, transform);
+                let tangent: Vector4<f32> = tangent.into();
                 vertices[i].tangent = tangent.truncate().normalize().extend(tangent.w);
             }
             true
@@ -360,6 +351,9 @@ impl Model {
             mesh_extras: mesh.extras().clone(),
             #[cfg(feature = "extras")]
             primitive_extras: primitive.extras().clone(),
+
+            transform,
+
             primitive_index,
             vertices,
             indices,
